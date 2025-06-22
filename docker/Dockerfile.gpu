@@ -1,0 +1,65 @@
+FROM nvidia/cuda:12.2-devel-ubuntu22.04 as builder
+
+# Install Python and build dependencies
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    build-essential \
+    cmake \
+    git \
+    wget \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symlink for python
+RUN ln -s /usr/bin/python3.11 /usr/bin/python
+
+WORKDIR /app
+
+# Copy requirements and install with GPU support
+COPY requirements.txt .
+RUN CMAKE_ARGS="-DLLAMA_CUBLAS=on" pip install --no-cache-dir --user -r requirements.txt
+
+# Production stage
+FROM nvidia/cuda:12.2-runtime-ubuntu22.04
+
+# Install Python runtime
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3-pip \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create symlink for python
+RUN ln -s /usr/bin/python3.11 /usr/bin/python
+
+# Copy Python packages from builder
+COPY --from=builder /root/.local /root/.local
+
+# Create non-root user
+RUN groupadd -r llmuser && useradd -r -g llmuser llmuser
+
+WORKDIR /app
+
+# Copy application code
+COPY src/ ./src/
+COPY config/ ./config/
+COPY scripts/ ./scripts/
+
+# Create directories
+RUN mkdir -p models logs \
+    && chown -R llmuser:llmuser /app
+
+RUN chmod +x scripts/*.sh
+
+USER llmuser
+
+ENV PATH=/root/.local/bin:$PATH
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+CMD ["python", "-m", "src.server"]
