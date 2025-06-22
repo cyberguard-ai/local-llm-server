@@ -64,4 +64,5 @@ coverage.xml
 
 # Temporary files
 *.tmp
-*.temp
+*.temphf_cache/
+*.gguf
